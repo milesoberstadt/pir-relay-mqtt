@@ -28,7 +28,7 @@ void setup() {
 
   setupWiFi();
   setupOTA();
-  
+
   Serial.println("Ready");
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
@@ -43,6 +43,10 @@ void setup() {
 }
 
 void loop() {
+  if (!mqttClient.connected())
+    connectMQTT();
+  mqttClient.loop();
+
   int pir_val = digitalRead(PIR_PIN);
   pir_event_count = pir_val == HIGH ? pir_val+1 : 0;
   if (pir_event_count >= pir_events_before_change)
@@ -54,15 +58,16 @@ void loop() {
   }
   if (pir_val != last_pir_val){
     last_pir_val = pir_val;
-    if (!mqttClient.connected())
-      connectMQTT();
     mqttClient.publish(PIR_STATE_TOPIC, (pir_val == HIGH ? "ON" : "OFF"));
   }
-  
+
   delay(pir_check_interval);
 }
 
 void updateRelay(bool bOn){
+  Serial.print("Turning relay ");
+  Serial.print((bOn ? "ON" : "OFF"));
+  Serial.println();
   digitalWrite(RELAY_PIN, (bOn ? HIGH : LOW));
   if (bOn)
     sleep_timer = AUTO_OFF_MS;
@@ -77,15 +82,15 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   Serial.print("Message arrived [");
   Serial.print(topic);
   Serial.print("] ");
-  char* payloadString = "";
+  String payloadString = "";
   for (int i = 0; i < length; i++) {
     payloadString += (char)payload[i];
   }
   Serial.print(payloadString);
   Serial.println();
 
-  if (topic == RELAY_STATE_TOPIC){
-    updateRelay(payloadString == "ON");
+  if (String(topic) == String(RELAY_SET_TOPIC)){
+    updateRelay((payloadString == "ON"));
   }
 }
 
@@ -106,7 +111,7 @@ void connectMQTT() {
   mqttClient.setCallback(mqttCallback);
   if (mqttClient.connect(HOSTNAME, MQTT_USERNAME, MQTT_PASSWORD)){
     Serial.println("Connected to MQTT server!");
-    mqttClient.subscribe(RELAY_STATE_TOPIC);
+    mqttClient.subscribe(RELAY_SET_TOPIC);
   }
   else {
     Serial.println("Couldn't connect to MQTT server, error code: ");
@@ -144,4 +149,3 @@ void setupOTA() {
   });
   ArduinoOTA.begin();
 }
-
