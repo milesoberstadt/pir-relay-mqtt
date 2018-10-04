@@ -1,6 +1,6 @@
-// TODO: Fix this wifi lib...
-//#include <ESP8266WiFi.h>
-#include <ESPmDNS.h>
+#include <ESP8266mDNS.h>
+
+#include <ESP8266WiFi.h>
 #include <WiFiUdp.h>
 #include <ArduinoOTA.h>
 #include <PubSubClient.h>
@@ -26,7 +26,7 @@ void setup() {
   Serial.begin(115200);
   Serial.println("Booting");
 
-  //setupWiFi();
+  setupWiFi();
   setupOTA();
   
   Serial.println("Ready");
@@ -66,8 +66,10 @@ void updateRelay(bool bOn){
   digitalWrite(RELAY_PIN, (bOn ? HIGH : LOW));
   if (bOn)
     sleep_timer = AUTO_OFF_MS;
-  if (!mqttClient.connected())
+  if (!mqttClient.connected()){
+    Serial.println("Reconnecting in updateRelay");
     connectMQTT();
+  }
   mqttClient.publish(RELAY_STATE_TOPIC, (bOn ? "ON" : "OFF"));
 }
 
@@ -87,7 +89,6 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   }
 }
 
-/*
 void setupWiFi() {
   WiFi.mode(WIFI_STA);
   WiFi.hostname(HOSTNAME);
@@ -98,17 +99,18 @@ void setupWiFi() {
     ESP.restart();
   }
 }
-*/
 
 void connectMQTT() {
-  mqttClient.setServer(MQTT_SERVER, 1833);
+  Serial.println("Attempting connection to MQTT server...");
+  mqttClient.setServer(MQTT_SERVER, 1883);
   mqttClient.setCallback(mqttCallback);
-  if (mqttClient.connect(HOSTNAME)){
+  if (mqttClient.connect(HOSTNAME, MQTT_USERNAME, MQTT_PASSWORD)){
     Serial.println("Connected to MQTT server!");
     mqttClient.subscribe(RELAY_STATE_TOPIC);
   }
   else {
-    Serial.println("Couldn't connect to MQTT server, error code: "+mqttClient.state());
+    Serial.println("Couldn't connect to MQTT server, error code: ");
+    Serial.println(mqttClient.state());
     if (mqttClient.state() < 0){
       delay(5000);
       connectMQTT();
