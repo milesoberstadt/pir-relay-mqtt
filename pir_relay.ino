@@ -13,11 +13,13 @@
 #define RELAY_PIN 4
 #define PIR_PIN 5
 
-int pir_events_before_change = 5;
-int pir_event_count = 0;
-int pir_check_interval = 0;
-int last_pir_val = 0;
-long sleep_timer = 0;
+const int pir_events_before_active = 5;
+const long pir_verification_window = 5000;
+int pir_triggers = 0;
+int pir_normalized_state = LOW;
+
+unsigned long last_motion_detected = 0;
+unsigned long last_motion_verified = 0;
 
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
@@ -43,25 +45,35 @@ void setup() {
 }
 
 void loop() {
+  ArduinoOTA.handle();
+
   if (!mqttClient.connected())
     connectMQTT();
   mqttClient.loop();
 
   int pir_val = digitalRead(PIR_PIN);
-  pir_event_count = pir_val == HIGH ? pir_val+1 : 0;
-  if (pir_event_count >= pir_events_before_change)
-    updateRelay(true);
-  if (AUTO_OFF_MS > 0){
-    sleep_timer -= pir_check_interval;
-    if (sleep_timer <= 0)
-      updateRelay(false);
-  }
-  if (pir_val != last_pir_val){
-    last_pir_val = pir_val;
-    mqttClient.publish(PIR_STATE_TOPIC, (pir_val == HIGH ? "ON" : "OFF"));
+  unsigned long currentMS = millis();
+
+  // If we've run out of time to verify motion, reset the counter
+  if (currentMS > last_motion_detected + pir_verification_window)
+    pir_triggers = 0;
+
+  // Since we want sustained motion over 5 seconds, make sure that this event happened 1+ sec since the last one
+  if (pir_val == HIGH && currentMS > last_motion_detected + 1000){
+    Serial.print("Seen ");
+    Serial.print((pir_triggers + 1));
+    Serial.println();
+    last_motion_detected = currentMS;
+    if (++pir_triggers == pir_events_before_active){
+      pir_triggers = 0;
+      last_motion_verified = currentMS;
+      updateRelay(true);
+    }
   }
 
-  delay(pir_check_interval);
+  // Check to see if we haven't had a significant motion event lately
+  if (currentMS > last_motion_verified + AUTO_OFF_MS)
+    updateRelay(false);
 }
 
 void updateRelay(bool bOn){
@@ -69,8 +81,6 @@ void updateRelay(bool bOn){
   Serial.print((bOn ? "ON" : "OFF"));
   Serial.println();
   digitalWrite(RELAY_PIN, (bOn ? HIGH : LOW));
-  if (bOn)
-    sleep_timer = AUTO_OFF_MS;
   if (!mqttClient.connected()){
     Serial.println("Reconnecting in updateRelay");
     connectMQTT();
@@ -91,6 +101,9 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 
   if (String(topic) == String(RELAY_SET_TOPIC)){
     updateRelay((payloadString == "ON"));
+    // Use this timestamp as a 'verified' event, should allow for normal sleep functions.
+    if (payloadString == "ON")
+      last_motion_verified = millis();
   }
 }
 
@@ -126,10 +139,12 @@ void connectMQTT() {
 void setupOTA() {
   ArduinoOTA.onStart([]() {
     String type;
-    if (ArduinoOTA.getCommand() == U_FLASH)
+    if (ArduinoOTA.getCommand() == U_FLASH) {
       type = "sketch";
-    else // U_SPIFFS
+    } else { // U_SPIFFS
       type = "filesystem";
+    }
+
     // NOTE: if updating SPIFFS this would be the place to unmount SPIFFS using SPIFFS.end()
     Serial.println("Start updating " + type);
   });
@@ -141,11 +156,18 @@ void setupOTA() {
   });
   ArduinoOTA.onError([](ota_error_t error) {
     Serial.printf("Error[%u]: ", error);
-    if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
-    else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
-    else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
-    else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
-    else if (error == OTA_END_ERROR) Serial.println("End Failed");
+    if (error == OTA_AUTH_ERROR) {
+      Serial.println("Auth Failed");
+    } else if (error == OTA_BEGIN_ERROR) {
+      Serial.println("Begin Failed");
+    } else if (error == OTA_CONNECT_ERROR) {
+      Serial.println("Connect Failed");
+    } else if (error == OTA_RECEIVE_ERROR) {
+      Serial.println("Receive Failed");
+    } else if (error == OTA_END_ERROR) {
+      Serial.println("End Failed");
+    }
   });
   ArduinoOTA.begin();
 }
+
