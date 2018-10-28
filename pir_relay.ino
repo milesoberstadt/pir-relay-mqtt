@@ -20,6 +20,7 @@ int pir_normalized_state = LOW;
 
 unsigned long last_motion_detected = 0;
 unsigned long last_motion_verified = 0;
+unsigned long last_reconnect = 0;
 
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
@@ -45,14 +46,17 @@ void setup() {
 }
 
 void loop() {
-  ArduinoOTA.handle();
+  unsigned long currentMS = millis();
 
-  if (!mqttClient.connected())
+  if (WiFi.status() != WL_CONNECTED && (currentMS > last_reconnect + 10000))
+    setupWiFi();
+  if (!mqttClient.connected() && (currentMS > last_reconnect + 10000))
     connectMQTT();
+
+  ArduinoOTA.handle();
   mqttClient.loop();
 
   int pir_val = digitalRead(PIR_PIN);
-  unsigned long currentMS = millis();
 
   // If we've run out of time to verify motion, reset the counter
   if (currentMS > last_motion_detected + pir_verification_window)
@@ -111,14 +115,19 @@ void setupWiFi() {
   WiFi.mode(WIFI_STA);
   WiFi.hostname(HOSTNAME);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  WiFi.waitForConnectResult();
+  // Disabled this reboot loop in case our WiFi is down.
+  /*
   while (WiFi.waitForConnectResult() != WL_CONNECTED) {
     Serial.println("Connection Failed! Rebooting...");
     delay(5000);
     ESP.restart();
   }
+  */
 }
 
 void connectMQTT() {
+  // Not sure if this will crash without a working WiFi connection
   Serial.println("Attempting connection to MQTT server...");
   mqttClient.setServer(MQTT_SERVER, 1883);
   mqttClient.setCallback(mqttCallback);
@@ -170,4 +179,3 @@ void setupOTA() {
   });
   ArduinoOTA.begin();
 }
-
