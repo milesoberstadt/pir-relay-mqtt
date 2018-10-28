@@ -48,10 +48,14 @@ void setup() {
 void loop() {
   unsigned long currentMS = millis();
 
-  if (WiFi.status() != WL_CONNECTED && (currentMS > last_reconnect + 10000))
+  if (WiFi.status() != WL_CONNECTED && (currentMS > last_reconnect + 10000)){
+    last_reconnect = currentMS;
     setupWiFi();
-  if (!mqttClient.connected() && (currentMS > last_reconnect + 10000))
+  }
+  if (!mqttClient.connected() && (currentMS > last_reconnect + 10000)){
+    last_reconnect = currentMS;
     connectMQTT();
+  }
 
   ArduinoOTA.handle();
   mqttClient.loop();
