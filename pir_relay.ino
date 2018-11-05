@@ -16,10 +16,10 @@
 const int pir_events_before_active = 5;
 const long pir_verification_window = 5000;
 int pir_triggers = 0;
-int pir_normalized_state = LOW;
 
 unsigned long last_motion_detected = 0;
 unsigned long last_motion_verified = 0;
+unsigned long last_stillness_reported = 0;
 unsigned long last_reconnect = 0;
 
 WiFiClient espClient;
@@ -43,6 +43,7 @@ void setup() {
 
   // Assume power up event should trigger power on
   updateRelay(true);
+  updateMotion(false);
 }
 
 void loop() {
@@ -63,8 +64,14 @@ void loop() {
   int pir_val = digitalRead(PIR_PIN);
 
   // If we've run out of time to verify motion, reset the counter
-  if (currentMS > last_motion_detected + pir_verification_window)
+  if (currentMS > last_motion_detected + pir_verification_window){
     pir_triggers = 0;
+    if (currentMS > last_stillness_reported + pir_verification_window){
+      // Debounce inactivity reporting
+      last_stillness_reported = currentMS;
+      updateMotion(false);
+    }
+  }
 
   // Since we want sustained motion over 5 seconds, make sure that this event happened 1+ sec since the last one
   if (pir_val == HIGH && currentMS > last_motion_detected + 1000){
@@ -76,6 +83,7 @@ void loop() {
       pir_triggers = 0;
       last_motion_verified = currentMS;
       updateRelay(true);
+      updateMotion(true);
     }
   }
 
@@ -89,11 +97,14 @@ void updateRelay(bool bOn){
   Serial.print((bOn ? "ON" : "OFF"));
   Serial.println();
   digitalWrite(RELAY_PIN, (bOn ? HIGH : LOW));
-  if (!mqttClient.connected()){
-    Serial.println("Reconnecting in updateRelay");
-    connectMQTT();
-  }
   mqttClient.publish(RELAY_STATE_TOPIC, (bOn ? "ON" : "OFF"));
+}
+
+void updateMotion(bool bOn){
+  Serial.print("Updating mqtt motion ");
+  Serial.print((bOn ? "ON" : "OFF"));
+  Serial.println();
+  mqttClient.publish(PIR_STATE_TOPIC, (bOn ? "ON" : "OFF"));
 }
 
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
